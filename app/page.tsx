@@ -1,69 +1,180 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+
+type Metric = {
+  _id: string;
+  totalRequests: number;
+  errorCount: number;
+  avgResponseTime: number;
+};
+
+type ApiMetric = Partial<Metric> & {
+  totalRequest?: number;
+  avgResponseTIme?: number;
+};
+
+type TimeseriesPoint = {
+  time: string;
+  [endpoint: string]: string | number;
+};
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [timeseries, setTimeseries] = useState<TimeseriesPoint[]>([]);
+
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        const [metricsResponse, timeseriesResponse] = await Promise.all([
+          fetch("http://localhost:4000/metrics"),
+          fetch("http://localhost:4000/metrics/timeseries"),
+        ]);
+
+        if (!metricsResponse.ok || !timeseriesResponse.ok) {
+          throw new Error("The metrics service returned an error.");
+        }
+
+        const [metricsData, timeseriesData] = await Promise.all([
+          metricsResponse.json() as Promise<ApiMetric[]>,
+          timeseriesResponse.json() as Promise<TimeseriesPoint[]>,
+        ]);
+
+        setMetrics(
+          metricsData.map((metric) => ({
+            _id: metric._id ?? "unknown",
+            totalRequests: metric.totalRequests ?? metric.totalRequest ?? 0,
+            errorCount: metric.errorCount ?? 0,
+            avgResponseTime: metric.avgResponseTime ?? metric.avgResponseTIme ?? 0,
+          })),
+        );
+        setTimeseries(timeseriesData);
+        setLastUpdated(new Date().toLocaleTimeString());
+        setError(null);
+      } catch (err) {
+        console.error("Failed to fetch metrics:", err);
+        setError("Unable to load metrics. Check that the API server is running on port 4000.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMetrics(); // run once immediately on load
+
+    const intervalId = setInterval(fetchMetrics, 5000); // then every 5 seconds
+
+    return () => clearInterval(intervalId); // cleanup when component unmounts
+  }, []);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 p-8 flex items-center justify-center">
+        <p className="text-slate-400">Loading metrics...</p>
       </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 p-8 flex items-center justify-center">
+        <p className="text-red-400">{error}</p>
+      </main>
+    );
+  }
+
+  const totalRequests = metrics.reduce((sum, m) => sum + m.totalRequests, 0);
+  const totalErrors = metrics.reduce((sum, m) => sum + m.errorCount, 0);
+  const errorRate = totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : "0.00";
+  const avgResponseTime =
+    metrics.length > 0
+      ? (metrics.reduce((sum, m) => sum + m.avgResponseTime, 0) / metrics.length).toFixed(0)
+      : "0";
+  const busiest = [...metrics].sort((a, b) => b.totalRequests - a.totalRequests)[0];
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-8">
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">DevPulse</h1>
+          <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+            Live
+          </span>
+        </div>
+        <span className="text-xs text-slate-400">Last updated: {lastUpdated || "—"}</span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 mb-8">
+        <SummaryCard label="Total Requests" value={totalRequests.toLocaleString()} />
+        <SummaryCard label="Error Rate" value={`${errorRate}%`} />
+        <SummaryCard label="Avg Response Time" value={`${avgResponseTime}ms`} />
+        <SummaryCard label="Busiest Endpoint" value={busiest ? busiest._id : "—"} />
+      </div>
+
+      <div className="bg-slate-900 rounded-xl p-6 mb-8 border border-slate-800">
+        <h2 className="text-sm font-medium text-slate-300 mb-4">Requests over time</h2>
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={timeseries}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+            <XAxis dataKey="time" stroke="#64748b" fontSize={12} />
+            <YAxis stroke="#64748b" fontSize={12} />
+            <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155" }} />
+            <Legend />
+            <Line type="monotone" dataKey="/checkout" stroke="#f87171" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="/orders" stroke="#60a5fa" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="/products" stroke="#34d399" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="/users" stroke="#fbbf24" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-800 text-slate-400 text-left">
+              <th className="p-4 font-medium">Endpoint</th>
+              <th className="p-4 font-medium">Requests</th>
+              <th className="p-4 font-medium">Errors</th>
+              <th className="p-4 font-medium">Error %</th>
+              <th className="p-4 font-medium">Avg Response</th>
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map((m) => {
+              const errPct = m.totalRequests > 0 ? (m.errorCount / m.totalRequests) * 100 : 0;
+              const isHigh = errPct > 5;
+              return (
+                <tr
+                  key={m._id}
+                  className={`border-b border-slate-800 last:border-0 ${isHigh ? "bg-red-950/30" : ""
+                    }`}
+                >
+                  <td className="p-4 font-mono">{m._id}</td>
+                  <td className="p-4">{m.totalRequests.toLocaleString()}</td>
+                  <td className="p-4">{m.errorCount}</td>
+                  <td className={`p-4 ${isHigh ? "text-red-400" : ""}`}>
+                    {errPct.toFixed(2)}%
+                  </td>
+                  <td className="p-4">{m.avgResponseTime.toFixed(0)}ms</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-slate-900 rounded-xl p-5 border border-slate-800">
+      <div className="text-xs text-slate-400 mb-1">{label}</div>
+      <div className="text-2xl font-semibold">{value}</div>
     </div>
   );
 }
