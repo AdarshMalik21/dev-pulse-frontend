@@ -31,8 +31,8 @@ export default function Home() {
     const fetchMetrics = async () => {
       try {
         const [metricsResponse, timeseriesResponse] = await Promise.all([
-          fetch("http://localhost:4000/metrics"),
-          fetch("http://localhost:4000/metrics/timeseries"),
+          fetch("/api/metrics"),
+          fetch("/api/metrics/timeseries"),
         ]);
 
         if (!metricsResponse.ok || !timeseriesResponse.ok) {
@@ -57,7 +57,7 @@ export default function Home() {
         setError(null);
       } catch (err) {
         console.error("Failed to fetch metrics:", err);
-        setError("Unable to load metrics. Check that the API server is running on port 4000.");
+        setError("Unable to load metrics. The API may be unavailable.");
       } finally {
         setLoading(false);
       }
